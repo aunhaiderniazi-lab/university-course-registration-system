@@ -5,8 +5,11 @@
 #include <string>
 #include <iomanip>
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 using namespace std;
+
+struct EndOfInput {};   // graceful EOF so destructors still save
 
 class Person {
 protected:
@@ -68,10 +71,29 @@ class University {
         while (true) {
             cout << prompt;
             if (cin >> val) return val;
+            if (cin.eof()) throw EndOfInput{};
             cin.clear();
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
             cout << "Invalid input. Please enter a number.\n";
         }
+    }
+
+    string readWord(const string& prompt) {
+        string val;
+        while (true) {
+            cout << prompt;
+            if (cin >> val) return val;
+            if (cin.eof()) throw EndOfInput{};
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input. Try again.\n";
+        }
+    }
+
+    int nextStudentId() const {
+        int maxId = 2000;
+        for (const auto& s : ss) if (s.getId() > maxId) maxId = s.getId();
+        return maxId + 1;
     }
 
 public:
@@ -79,18 +101,29 @@ public:
         ifstream f("courses.txt");
         string c, n, p;
         int cr, cp, t;
-        while (f >> c >> n >> cr >> cp >> t >> p)
+        while (f >> c >> n >> cr >> cp >> t >> p) {
+            if (cr <= 0 || cp <= 0 || t < 0) continue;
             cs.emplace_back(c, n, cr, cp, p, t);
+        }
 
         ifstream g("students.txt");
         int id, k;
         string x;
         while (g >> id >> n >> k) {
+            if (id <= 0 || k < 0 || k > 1000) break;   // truncated/corrupt file
             Student s(id, n);
-            while (k-- > 0 && (g >> x)) s.done.push_back(x);
-            if (g >> k) {
-                while (k-- > 0 && (g >> x)) s.regd.push_back(x);
+            bool ok = true;
+            for (int i = 0; i < k && ok; ++i) {
+                if (!(g >> x)) { ok = false; break; }
+                s.done.push_back(x);
             }
+            if (!ok) break;
+            if (!(g >> k) || k < 0 || k > 1000) break;
+            for (int i = 0; i < k && ok; ++i) {
+                if (!(g >> x)) { ok = false; break; }
+                s.regd.push_back(x);
+            }
+            if (!ok) break;
             ss.push_back(s);
         }
 
@@ -105,13 +138,16 @@ public:
     }
 
     ~University() {
-        ofstream f("courses.txt");
+        ofstream f("courses.txt", ios::trunc);
+        if (!f) cerr << "Warning: could not write courses.txt; data was not saved.\n";
         for (const auto& c : cs)
-            f << c.code << " " << c.name << " " << c.credits << " "
-              << c.cap << " " << c.taken << " " << c.prereq << "\n";
+            if (f) f << c.code << " " << c.name << " " << c.credits << " "
+                     << c.cap << " " << c.taken << " " << c.prereq << "\n";
 
-        ofstream g("students.txt");
+        ofstream g("students.txt", ios::trunc);
+        if (!g) cerr << "Warning: could not write students.txt; data was not saved.\n";
         for (const auto& s : ss) {
+            if (!g) break;
             g << s.getId() << " " << s.getName() << " " << s.done.size();
             for (const auto& d : s.done) g << " " << d;
             g << " " << s.regd.size();
@@ -131,9 +167,7 @@ public:
 
     void reg(Student& s) {
         list();
-        string c;
-        cout << "Course code: ";
-        cin >> c;
+        string c = readWord("Course code: ");
         Course* x = course(c);
         if (!x) throw string("Course not found");
         if (s.has(s.regd, c)) throw string("Already registered");
@@ -149,9 +183,7 @@ public:
     }
 
     void drop(Student& s) {
-        string c;
-        cout << "Course code to drop: ";
-        cin >> c;
+        string c = readWord("Course code to drop: ");
         auto it = find(s.regd.begin(), s.regd.end(), c);
         if (it == s.regd.end()) throw string("You are not registered in that course");
         s.regd.erase(it);
@@ -186,10 +218,8 @@ public:
     }
 
     void newStudent() {
-        string n;
-        cout << "Name (one word): ";
-        cin >> n;
-        int id = 2001 + static_cast<int>(ss.size());
+        string n = readWord("Name (one word): ");
+        int id = nextStudentId();
         ss.emplace_back(id, n);
         cout << "Account created! Your ID: " << id << "\n";
     }
@@ -202,10 +232,13 @@ public:
     }
 
     void admin() {
-        string pw;
-        cout << "Admin password: ";
-        cin >> pw;
-        if (pw != "admin123") {
+        const char* expected = getenv("ADMIN_PASSWORD");
+        if (!expected || !*expected) {
+            cout << "Admin access is disabled. Set the ADMIN_PASSWORD environment variable.\n";
+            return;
+        }
+        string pw = readWord("Admin password: ");
+        if (pw != expected) {
             cout << "Wrong password\n";
             return;
         }
@@ -214,21 +247,18 @@ public:
             c = readInt("\n1.Add course 2.Mark completed 3.View courses 4.Back\nChoice: ");
             try {
                 if (c == 1) {
-                    string code, n, p;
-                    cout << "Code Name(one word): ";
-                    cin >> code >> n;
+                    string code = readWord("Course code: ");
+                    string n = readWord("Name (one word): ");
                     int cr = readInt("Credits: ");
                     int cp = readInt("Seats: ");
-                    cout << "Prereq(or none): ";
-                    cin >> p;
+                    string p = readWord("Prereq (or none): ");
+                    if (cr <= 0 || cp <= 0) throw string("Credits and seats must be positive");
                     if (course(code)) throw string("Course already exists");
                     cs.emplace_back(code, n, cr, cp, p);
                     cout << "Course added\n";
                 } else if (c == 2) {
                     int id = readInt("Student ID: ");
-                    string code;
-                    cout << "Course code: ";
-                    cin >> code;
+                    string code = readWord("Course code: ");
                     Student* s = student(id);
                     if (!s) throw string("Student not found");
                     auto it = find(s->regd.begin(), s->regd.end(), code);
@@ -248,20 +278,25 @@ public:
 
 int main() {
     cout << "Course Registration System - by Aun Haider Niazi\n";
-    University u;
-    int c;
-    do {
-        c = 0;
-        cout << "\n=== COURSE REGISTRATION ===\n1.Student login 2.New student 3.Admin 4.Exit\nChoice: ";
-        if (!(cin >> c)) {
-            cin.clear();
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            cout << "Invalid input. Please enter a number.\n";
-            continue;
-        }
-        if (c == 1) u.login();
-        else if (c == 2) u.newStudent();
-        else if (c == 3) u.admin();
-    } while (c != 4);
+    try {
+        University u;
+        int c;
+        do {
+            c = 0;
+            cout << "\n=== COURSE REGISTRATION ===\n1.Student login 2.New student 3.Admin 4.Exit\nChoice: ";
+            if (!(cin >> c)) {
+                if (cin.eof()) { cout << "\nEnd of input. Data saved.\n"; break; }
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                cout << "Invalid input. Please enter a number.\n";
+                continue;
+            }
+            if (c == 1) u.login();
+            else if (c == 2) u.newStudent();
+            else if (c == 3) u.admin();
+        } while (c != 4);
+    } catch (const EndOfInput&) {
+        cout << "\nEnd of input. Data saved.\n";
+    }
     return 0;
 }
