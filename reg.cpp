@@ -94,6 +94,7 @@ public:
             ss.push_back(s);
         }
 
+        // Seed default catalog on first run
         if (cs.empty()) {
             cs.emplace_back("CS101", "Programming", 3, 30);
             cs.emplace_back("CS102", "OOP", 3, 25, "CS101");
